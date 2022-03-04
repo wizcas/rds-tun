@@ -1,0 +1,111 @@
+#!/bin/bash
+
+CMD="rds"
+ME=$(whoami)
+PORT=${RDS_PORT:-5436}
+TARGET="${RDS_TARGET}"
+AWS_PROFILE="${RDS_AWS_PROFILE}"
+SECRET_ID="${RDS_SECRET_ID}"
+
+function checkVars {
+  MISSING_VARS=()
+  if [ -z "$TARGET" ]; then
+    MISSING_VARS+=("\033[36mRDS_TARGET\033[0m        The remote RDS endpoint to be tunneled to")
+  fi
+  if [ -z "$AWS_PROFILE" ]; then
+    MISSING_VARS+=("\033[36mRDS_AWS_PROFILE\033[0m   The name of the AWS profile for fetching the secrets")
+  fi
+  if [ -z "$SECRET_ID" ]; then
+    MISSING_VARS+=("\033[36mRDS_SECRET_ID\033[0m     The AWS secret ID that contains the RDS credentials")
+  fi
+
+  echo $MISSING_VARS
+
+  if [ ${#MISSING_VARS[@]} -gt 0 ]; then
+    echo -e "❌ \033[1;31m Please set the following environment variables before using this tool: \033[0m"
+
+    for i in "${MISSING_VARS[@]}"; do
+      echo -e "  ${i}"
+    done
+    exit 400
+  fi
+}
+
+function getCreds {
+  ss=$(aws --profile ${AWS_PROFILE} secretsmanager get-secret-value --secret-id ${SECRET_ID} | jq ".SecretString" -r)
+  PGUSERNAME=$(echo ${ss} | jq ".username" -r)
+  PGPASSWORD=$(echo ${ss} | jq ".password" -r)
+}
+
+function up {
+  if [ ! -z "$(pid)" ]; then
+    echo "⌛ RDS tunneling is up already. You can shut down the existing one by running
+  $CMD down
+"
+    exit 409
+  fi
+
+  echo "🛫 Tunneling...
+SSH User:   ${ME}
+Local port: ${PORT}
+Target:     ${TARGET}
+"
+  ssh -fN -L ${PORT}:${TARGET} ${ME}@afc-internal-bastion
+}
+
+function down {
+  pkill -f "${TARGET}"
+  echo "🛬 The tunnel is gone."
+}
+
+function pid {
+  pgrep -f "${TARGET}"
+}
+
+function runPsql {
+  if [ -z "$(pid)" ]; then
+    echo "RDS tunneling is not found. Please establish the tunnel by:
+  $CMD up
+"
+    exit 2
+  fi
+
+  getCreds
+  echo "credentials fetched, connecting to DB..."
+  PGPASSWORD=${PGPASSWORD} psql -h localhost -p ${PORT} -U ${PGUSERNAME} -d dms_document
+}
+
+checkVars
+
+case $1 in
+up)
+  up
+  echo "
+✈️  Done. Now you can connect to the DB with:
+  $CMD psql
+"
+  ;;
+psql)
+  runPsql
+  ;;
+down)
+  down
+  ;;
+status)
+  if [ -z "$(pid)" ]; then
+    echo "🔴 The RDS tunneling is DOWN."
+  else
+    echo "🟢 The RDS tunneling is UP."
+  fi
+  ;;
+*)
+  echo "Usage: $CMD <command>"
+  echo "Commands:
+    up      tunnel localhost:${PORT} to the RDS
+    psql    access the DB with Postgres CLI
+    down    shut down the tunneling
+    status  check if the tunneling is up
+"
+  exit 1
+  ;;
+esac

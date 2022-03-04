@@ -1,0 +1,34 @@
+#!/bin/bash
+
+REPO="https://raw.githubusercontent.com/wizcas/rds-tun/main"
+REMOTE_VERSION_FILE="${REPO}/VERSION"
+REMOTE_MAIN_FILE="${REPO}/rds-tun"
+LOCAL_DIR="${HOME}/.rds-tun"
+LOCAL_VERSION_FILE="${LOCAL_DIR}/VERSION"
+LOCAL_MAIN_FILE="${LOCAL_DIR}/rds-tun"
+mkdir -p ${LOCAL_DIR}
+
+REMOTE_VERSION=$(curl -sL ${REMOTE_VERSION_FILE})
+
+if [ -f "${LOCAL_VERSION_FILE}" ]; then
+  LOCAL_VERSION=$(cat ${LOCAL_VERSION_FILE})
+else
+  LOCAL_VERSION=-1
+fi
+
+if [ ${DEBUG} ]; then
+  echo "
+VERSION CHECK:
+  local: ${LOCAL_VERSION}
+  remote: ${REMOTE_VERSION}
+"
+fi
+
+if [ ${REMOTE_VERSION} -gt ${LOCAL_VERSION} ]; then
+  echo "New version detected. Updating..."
+  curl -sL -o ${LOCAL_MAIN_FILE} ${REMOTE_MAIN_FILE}
+  echo ${REMOTE_VERSION} >${LOCAL_VERSION_FILE}
+fi
+
+chmod +x ${LOCAL_MAIN_FILE}
+bash -c "${LOCAL_MAIN_FILE} $@"
